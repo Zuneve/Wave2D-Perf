@@ -7,3 +7,10 @@
 
 # macOS
 .DS_Store
+
+# Developer notes (not for repo)
+README-dev.md
+
+# Simulation output
+*.bin
+*.mp4

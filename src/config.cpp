@@ -11,48 +11,28 @@ namespace {
 
 [[noreturn]] void print_help_and_exit() {
     std::cout
-        << "Usage: physicsProject [options]\n"
-        << "  --solver all|naive|soa|threads|omp|cuda\n"
-        << "  --nx N --ny N --steps N --warmup N\n"
-        << "  --dt DT --dx DX --dy DY --mass M\n"
-        << "  --tile-x N --tile-y N --threads N\n"
-        << "  --potential-strength V --packet-sigma S --packet-kx KX --packet-ky KY\n";
+        << "Usage: wave2d [options]\n\n"
+        << "Simulation parameters:\n"
+        << "  --nx N            Grid width  (default: 1024)\n"
+        << "  --ny N            Grid height (default: 1024)\n"
+        << "  --steps N         Time steps  (default: 400)\n"
+        << "  --warmup N        Warmup steps before timing (default: 5)\n"
+        << "  --dt DT           Time step size (default: 1e-4)\n"
+        << "  --dx DX           Spatial step x (default: 0.1)\n"
+        << "  --dy DY           Spatial step y (default: 0.1)\n"
+        << "  --mass M          Particle mass (default: 1.0)\n"
+        << "  --potential-strength V\n"
+        << "  --packet-sigma S  --packet-kx KX  --packet-ky KY\n\n"
+        << "Modes:\n"
+        << "  --sweep           Run benchmark over grid sizes 128..2048, write CSV\n"
+        << "  --dump-every N    Dump |psi|^2 every N steps to a binary file\n"
+        << "  --output PATH     Output file for --sweep (CSV) or --dump-every (bin)\n";
     std::exit(EXIT_SUCCESS);
-}
-
-SolverKind parse_solver(std::string_view value) {
-    if (value == "all") {
-        return SolverKind::all;
-    }
-    if (value == "naive") {
-        return SolverKind::naive_aos;
-    }
-    if (value == "soa") {
-        return SolverKind::soa_simd;
-    }
-    if (value == "threads") {
-        return SolverKind::threads;
-    }
-    if (value == "omp") {
-        return SolverKind::omp;
-    }
-    if (value == "cuda") {
-        return SolverKind::cuda;
-    }
-    throw std::runtime_error("Unknown solver: " + std::string(value));
 }
 
 std::size_t parse_size(std::string_view label, const char* value) {
     try {
         return static_cast<std::size_t>(std::stoull(value));
-    } catch (const std::exception&) {
-        throw std::runtime_error("Invalid integer for " + std::string(label) + ": " + value);
-    }
-}
-
-int parse_int(std::string_view label, const char* value) {
-    try {
-        return std::stoi(value);
     } catch (const std::exception&) {
         throw std::runtime_error("Invalid integer for " + std::string(label) + ": " + value);
     }
@@ -84,85 +64,64 @@ SimulationConfig parse_args(int argc, char** argv) {
         if (arg == "--help" || arg == "-h") {
             print_help_and_exit();
         }
-
-        if (arg == "--solver") {
-            config.solver = parse_solver(require_value(argc, argv, i));
-            ++i;
-            continue;
-        }
         if (arg == "--nx") {
-            config.nx = parse_size(arg, require_value(argc, argv, i));
-            ++i;
+            config.nx = parse_size(arg, require_value(argc, argv, i++));
             continue;
         }
         if (arg == "--ny") {
-            config.ny = parse_size(arg, require_value(argc, argv, i));
-            ++i;
+            config.ny = parse_size(arg, require_value(argc, argv, i++));
             continue;
         }
         if (arg == "--steps") {
-            config.steps = parse_size(arg, require_value(argc, argv, i));
-            ++i;
+            config.steps = parse_size(arg, require_value(argc, argv, i++));
             continue;
         }
         if (arg == "--warmup") {
-            config.warmup_steps = parse_size(arg, require_value(argc, argv, i));
-            ++i;
+            config.warmup_steps = parse_size(arg, require_value(argc, argv, i++));
             continue;
         }
         if (arg == "--dt") {
-            config.dt = parse_float(arg, require_value(argc, argv, i));
-            ++i;
+            config.dt = parse_float(arg, require_value(argc, argv, i++));
             continue;
         }
         if (arg == "--dx") {
-            config.dx = parse_float(arg, require_value(argc, argv, i));
-            ++i;
+            config.dx = parse_float(arg, require_value(argc, argv, i++));
             continue;
         }
         if (arg == "--dy") {
-            config.dy = parse_float(arg, require_value(argc, argv, i));
-            ++i;
+            config.dy = parse_float(arg, require_value(argc, argv, i++));
             continue;
         }
         if (arg == "--mass") {
-            config.mass = parse_float(arg, require_value(argc, argv, i));
-            ++i;
+            config.mass = parse_float(arg, require_value(argc, argv, i++));
             continue;
         }
         if (arg == "--potential-strength") {
-            config.potential_strength = parse_float(arg, require_value(argc, argv, i));
-            ++i;
+            config.potential_strength = parse_float(arg, require_value(argc, argv, i++));
             continue;
         }
         if (arg == "--packet-sigma") {
-            config.packet_sigma = parse_float(arg, require_value(argc, argv, i));
-            ++i;
+            config.packet_sigma = parse_float(arg, require_value(argc, argv, i++));
             continue;
         }
         if (arg == "--packet-kx") {
-            config.packet_kx = parse_float(arg, require_value(argc, argv, i));
-            ++i;
+            config.packet_kx = parse_float(arg, require_value(argc, argv, i++));
             continue;
         }
         if (arg == "--packet-ky") {
-            config.packet_ky = parse_float(arg, require_value(argc, argv, i));
-            ++i;
+            config.packet_ky = parse_float(arg, require_value(argc, argv, i++));
             continue;
         }
-        if (arg == "--tile-x") {
-            config.tile_x = parse_size(arg, require_value(argc, argv, i));
-            ++i;
+        if (arg == "--dump-every") {
+            config.dump_every = parse_size(arg, require_value(argc, argv, i++));
             continue;
         }
-        if (arg == "--tile-y") {
-            config.tile_y = parse_size(arg, require_value(argc, argv, i));
-            ++i;
+        if (arg == "--output") {
+            config.output = require_value(argc, argv, i++);
             continue;
         }
-        if (arg == "--threads") {
-            config.threads = parse_int(arg, require_value(argc, argv, i));
-            ++i;
+        if (arg == "--sweep") {
+            config.sweep = true;
             continue;
         }
 
@@ -178,44 +137,8 @@ SimulationConfig parse_args(int argc, char** argv) {
     if (config.mass <= 0.0f || config.dx <= 0.0f || config.dy <= 0.0f || config.dt <= 0.0f) {
         throw std::runtime_error("dt, dx, dy and mass must be positive.");
     }
-    if (config.tile_x == 0 || config.tile_y == 0) {
-        throw std::runtime_error("tile sizes must be positive.");
-    }
 
     return config;
-}
-
-std::string to_string(SolverKind kind) {
-    switch (kind) {
-        case SolverKind::all:
-            return "all";
-        case SolverKind::naive_aos:
-            return "naive";
-        case SolverKind::soa_simd:
-            return "soa";
-        case SolverKind::threads:
-            return "threads";
-        case SolverKind::omp:
-            return "omp";
-        case SolverKind::cuda:
-            return "cuda";
-    }
-
-    return "unknown";
-}
-
-std::vector<SolverKind> expand_requested_solvers(SolverKind requested) {
-    if (requested == SolverKind::all) {
-        return {
-            SolverKind::naive_aos,
-            SolverKind::soa_simd,
-            SolverKind::threads,
-            SolverKind::omp,
-            SolverKind::cuda,
-        };
-    }
-
-    return {requested};
 }
 
 }  // namespace physics

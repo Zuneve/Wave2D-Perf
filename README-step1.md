@@ -1,0 +1,193 @@
+# Wave2D-Perf. Этап 1.
+
+## Этап 1 - Наивная реализация: базовое профилирование
+
+### Железо
+
+| Параметр | Значение |
+|---|---|
+| CPU | Apple M2 |
+| P-cores / E-cores | 4 + 4 |
+| L1d cache (per core) | 64 KB |
+| L2 cache (shared) | 4 MB |
+| L3 cache | - (нет) |
+| Unified memory BW | ~100 GB/s |
+| RAM | 16 GB |
+
+---
+
+### Реализация: `std::complex<float>`, AoS, явный Эйлер
+
+`src/solvers/naive_solver.cpp` - прямолинейная реализация без каких-либо
+ручных оптимизаций: данные хранятся как `std::vector<std::complex<float>>`
+(вещественная и мнимая части чередуются в памяти - **Array of Structs**).
+
+---
+
+### Benchmark sweep (Apple M2, clang 17, -O3 -march=native -ffast-math)
+
+| Grid | Steps | Time (s) | MLUPS | Working set |
+|---|---|---|---|---|
+| 128×128 | 100 | 0.001 | 1227 | 0.3 MB → L2 |
+| 256×256 | 100 | 0.005 | 1236 | 1.2 MB → L2 |
+| 512×512 | 100 | 0.018 | **1467** | 5.0 MB → RAM |
+| 1024×1024 | 100 | 0.086 | 1208 | 20 MB → RAM |
+| 2048×2048 | 100 | 0.346 | 1212 | 80 MB → RAM |
+
+**Наблюдение:** производительность проседает при переходе 512→1024 - это
+момент, когда рабочий набор данных (ψ текущий + ψ следующий + потенциал)
+перестаёт помещаться в L2 (4 MB) и уходит в unified memory.
+
+---
+
+### Flame graph (sample, 2048×2048, 2000 steps)
+
+```
+Thread_main  100%
+ └── main
+      └── physics::run_benchmark
+           └── physics::(anon)::advance_steps   ← 100% времени
+```
+
+**100% CPU-времени** тратится внутри `advance_steps`. Никаких других
+горячих путей нет — работа по оптимизации сосредоточена в одной функции.
+
+---
+
+### Анализ векторизации (`-Rpass=vectorize -Rpass-missed=vectorize`)
+
+```
+naive_solver.cpp:38:13: vectorized loop (vectorization width: 4)  ✓
+naive_solver.cpp:38:13: the cost-model indicates that interleaving is not beneficial
+
+naive_solver.cpp:30:5: loop not vectorized  ✗  (внешний цикл по шагам)
+
+complex:478: Cannot SLP vectorize: only 2 elements of buildvector  ✗
+complex:478: Cannot SLP vectorize: vectorization was impossible with
+             available vectorization factors  ✗  (повтор 10+ раз)
+```
+
+**Что произошло:** компилятор *формально* векторизовал внутренний цикл
+с шириной 4, но SLP-векторизатор (superword-level parallelism) провалился
+в 10+ местах из-за `std::complex<float>`. Проблема - **AoS layout**:
+элементы хранятся как `[re₀, im₀, re₁, im₁, re₂, im₂, ...]`, поэтому для
+загрузки 4 вещественных частей подряд нужны shuffle-инструкции. Компилятор
+это не осилил эффективно.
+
+---
+
+### Дизассемблер: что реально делает горячий цикл
+
+```
+; Тело горячего цикла (AArch64 / NEON):
+ldp  s5, s6,   [x23]          ; загрузить re+im соседнего элемента (8 байт)
+ldp  s7, s16,  [x4, #-0x8]
+ldp  s17, s18, [x21]
+ldr  s19, [x7, x25, lsl #2]  ; загрузить потенциал V[i,j]
+ldp  s20, s21, [x4, #0x8]
+ldr  d22, [x4]                ; загрузить center как 64-bit (re+im)
+
+fmul  s23, s2, s22            ; -2.0 * re_center
+fmul.s s24, s2, v22[1]        ; -2.0 * im_center
+fadd  s7,  s7,  s20           ; lap_x re: left_re + right_re
+fadd  s16, s16, s21           ;        im: left_im + right_im
+fadd  s7,  s7,  s23           ; + (-2*center_re)
+fadd  s16, s16, s24
+...
+fmadd s5, s5, s4, s7          ; fused multiply-add
+fmadd s6, s6, s4, s16
+
+mov.s v7[1], v5[0]            ; ← shuffle: упаковать re/im обратно в вектор
+mov.s v6[1], v16[0]           ; ← shuffle
+fsub.2s v5, v7, v6            ; 2-wide SIMD subtract
+fmla.2s v22, v5, v17[0]       ; 2-wide fused multiply-add
+str  d22, [x19, x20]          ; запись результата
+```
+
+**Ключевые наблюдения:**
+- Компилятор использует только **`.2s`** (2 float за раз вместо 4) - NEON
+  работает в половину своей мощности
+- Много инструкций `mov.s` / shuffle - компилятор вынужден перекладывать
+  байты из-за чередованного AoS-формата
+- Нет `ld1` / `ld2` / `ld4` - нет lane-interleaved загрузок
+
+---
+
+### Roofline-анализ
+
+**Подсчёт операций на одну ячейку:**
+
+| Операция | FLOPs |
+|---|---|
+| lap_x = (left + right − 2·center) · inv_dx² | 8 |
+| lap_y = (north + south − 2·center) · inv_dy² | 8 |
+| laplacian = lap_x + lap_y | 2 |
+| i/(2m) · laplacian | 2 (mul; re-часть = 0) |
+| −i·V · center | 2 (mul) |
+| derivative = sum | 2 |
+| next = center + dt · derivative | 4 |
+| **Итого** | **28 FLOP/cell** |
+
+**Трафик памяти на одну ячейку (наивная оценка, без учёта кэша):**
+
+| Данные | Байт |
+|---|---|
+| 5 соседей × complex<float> | 40 |
+| potential[i,j] | 4 |
+| запись next[i,j] | 8 |
+| **Итого** | **52 байт/cell** |
+
+```
+Arithmetic intensity = 28 / 52 ≈ 0.54 FLOP/byte
+
+Ridge point M2 (single core) ≈ 56 GFLOPS / 100 GB/s = 0.56 FLOP/byte
+```
+
+Мы **ровно на пороге** ridge point - на грани compute- и memory-bound.
+Потолки:
+
+| Предел | Значение |
+|---|---|
+| Memory ceiling (100 GB/s / 52 B) | **1923 MLUPS** |
+| Compute ceiling (56 GFLOPS / 28 FLOP) | **2000 MLUPS** |
+| **Измеренный результат** | **1200–1470 MLUPS** |
+
+Эффективность ≈ **63–76% от теоретического потолка** - достаточно высоко
+для наивной реализации.
+
+---
+
+### Runtime-статистика (1024×1024, 500 steps)
+
+| Метрика | Значение |
+|---|---|
+| IPC (инструкций за такт) | **3.43** |
+| Эффективная частота | 3.35 GHz |
+| Реальный FLOP throughput | 37.4 GFLOPS |
+| Реальный memory traffic | **69.4 GB/s** |
+| Peak RSS | 47 MB |
+
+**IPC = 3.43** при теоретическом пике ~8 говорит о том, что часть тактов
+тратится на ожидание памяти. Реальный memory traffic (69 GB/s) подтверждает:
+мы активно утилизируем memory bus, но не на 100% — часть данных приходит
+из L2 кэша для малых сеток.
+
+---
+
+### Выводы
+
+1. **Единственный hotspot - `advance_steps`** (100% времени). Там и нужно работать.
+
+2. **AoS layout** `std::complex<float>` не позволяет
+   компилятору эффективно упаковать несколько ячеек в один SIMD-регистр.
+   Реально получаем `.2s` (2-wide) вместо `.4s` (4-wide на NEON 128-bit).
+
+3. **Память — главный ограничитель для больших сеток.** При 512×512 и выше
+   рабочий набор не помещается в L2 → идём в unified memory → производительность
+   фиксируется на ~1200 MLUPS вне зависимости от размера сетки.
+
+4. **Мы близко к потолку** (~63–76% от теоретического), но неэффективно:
+   тратим память на shuffle-инструкции (AoS→SIMD перестановки)
+   и не используем полную ширину NEON.
+
+---

@@ -1,68 +1,121 @@
+#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <stdexcept>
+#include <vector>
 
 #include "physics/benchmark.hpp"
+#include "physics/config.hpp"
+#include "physics/field.hpp"
+#include "physics/solvers.hpp"
+
+namespace {
+
+void print_header() {
+    std::cout << std::left
+              << std::setw(10) << "nx"
+              << std::setw(10) << "ny"
+              << std::setw(10) << "steps"
+              << std::setw(14) << "time (s)"
+              << std::setw(14) << "MLUPS"
+              << std::setw(18) << "L2 norm"
+              << std::setw(18) << "max |psi|"
+              << "\n"
+              << std::string(94, '-') << "\n";
+}
+
+void print_result(const physics::BenchmarkResult& r) {
+    std::cout << std::left
+              << std::setw(10) << r.nx
+              << std::setw(10) << r.ny
+              << std::setw(10) << r.steps
+              << std::setw(14) << std::fixed      << std::setprecision(6) << r.seconds
+              << std::setw(14) << std::fixed      << std::setprecision(2) << r.mlups
+              << std::setw(18) << std::scientific << std::setprecision(6) << r.l2_norm
+              << std::setw(18) << std::scientific << std::setprecision(6) << r.max_amplitude
+              << "\n";
+}
+
+void write_csv(const std::string& path, const std::vector<physics::BenchmarkResult>& results) {
+    std::ofstream f(path);
+    if (!f) throw std::runtime_error("Cannot open CSV output: " + path);
+
+    f << "nx,ny,cells,steps,seconds,mlups,l2_norm,max_amplitude\n";
+    for (const auto& r : results) {
+        f << r.nx << "," << r.ny << "," << (r.nx * r.ny) << "," << r.steps << ","
+          << std::fixed      << std::setprecision(9) << r.seconds      << ","
+          << std::fixed      << std::setprecision(6) << r.mlups        << ","
+          << std::scientific << std::setprecision(9) << r.l2_norm      << ","
+          << std::scientific << std::setprecision(6) << r.max_amplitude << "\n";
+    }
+}
+
+void run_single(const physics::SimulationConfig& config) {
+    std::cout << "Wave2D — naive std::complex<float>\n"
+              << "grid: " << config.nx << "x" << config.ny
+              << "  steps: " << config.steps
+              << "  dt: " << config.dt
+              << "  dx: " << config.dx << "\n\n";
+
+    print_header();
+    print_result(physics::run_benchmark(config));
+}
+
+void run_sweep(const physics::SimulationConfig& base) {
+    const std::vector<std::size_t> sizes = {128, 256, 512, 1024, 2048};
+
+    std::cout << "Sweep benchmark — naive std::complex<float>\n"
+              << "steps: " << base.steps
+              << "  dt: " << base.dt
+              << "  dx: " << base.dx << "\n\n";
+    print_header();
+
+    std::vector<physics::BenchmarkResult> results;
+    for (const auto size : sizes) {
+        physics::SimulationConfig config = base;
+        config.nx = size;
+        config.ny = size;
+        const auto result = physics::run_benchmark(config);
+        print_result(result);
+        results.push_back(result);
+    }
+
+    const std::string csv_path = base.output.empty() ? "benchmark.csv" : base.output;
+    write_csv(csv_path, results);
+    std::cout << "\nResults saved to " << csv_path << "\n"
+              << "Visualize: python3 tools/plot_benchmark.py " << csv_path << "\n";
+}
+
+void run_dump(const physics::SimulationConfig& config) {
+    const std::string out_path = config.output.empty() ? "simulation.bin" : config.output;
+    const std::size_t n_frames = config.steps / config.dump_every + 1;
+    const std::size_t mb = n_frames * config.nx * config.ny * sizeof(float) / (1024 * 1024);
+
+    std::cout << "Simulation dump — " << config.nx << "x" << config.ny
+              << "  steps: " << config.steps
+              << "  dump every: " << config.dump_every << " steps\n"
+              << n_frames << " frames  ~" << mb << " MB  -> " << out_path << "\n";
+
+    const physics::InitialState initial = physics::make_initial_state(config);
+    physics::run_naive_dump(config, initial, out_path);
+
+    std::cout << "Done.\n"
+              << "Animate:  python3 tools/animate_simulation.py " << out_path << "\n"
+              << "Save MP4: python3 tools/animate_simulation.py " << out_path << " -o wave.mp4\n";
+}
+
+}  // namespace
 
 int main(int argc, char** argv) {
     try {
         const physics::SimulationConfig config = physics::parse_args(argc, argv);
-        const auto results = physics::run_requested_benchmarks(config);
-        const char* requested_solver = "all";
 
-        switch (config.solver) {
-            case physics::SolverKind::all:
-                requested_solver = "all";
-                break;
-            case physics::SolverKind::naive_aos:
-                requested_solver = "naive";
-                break;
-            case physics::SolverKind::soa_simd:
-                requested_solver = "soa";
-                break;
-            case physics::SolverKind::threads:
-                requested_solver = "threads";
-                break;
-            case physics::SolverKind::omp:
-                requested_solver = "omp";
-                break;
-            case physics::SolverKind::cuda:
-                requested_solver = "cuda";
-                break;
-        }
-
-        std::cout << "2D wave-function benchmark\n";
-        std::cout << "grid=" << config.nx << "x" << config.ny
-                  << ", steps=" << config.steps
-                  << ", dt=" << config.dt
-                  << ", solver=" << requested_solver << "\n\n";
-
-        std::cout << std::left
-                  << std::setw(18) << "backend"
-                  << std::setw(14) << "time (s)"
-                  << std::setw(14) << "MLUPS"
-                  << std::setw(18) << "L2 norm"
-                  << std::setw(18) << "max |psi|"
-                  << "\n";
-
-        for (const auto& result : results) {
-            std::cout << std::left
-                      << std::setw(18) << result.name
-                      << std::setw(14) << std::fixed << std::setprecision(6) << result.seconds
-                      << std::setw(14) << std::fixed << std::setprecision(2) << result.mlups
-                      << std::setw(18) << std::scientific << std::setprecision(6) << result.l2_norm
-                      << std::setw(18) << std::scientific << std::setprecision(6) << result.max_amplitude
-                      << "\n";
-        }
-
-#if !defined(PHYSICS_HAS_OPENMP) || !PHYSICS_HAS_OPENMP
-        if (config.solver == physics::SolverKind::all) {
-            std::cout << "\nOpenMP backend skipped: this build has no OpenMP support.\n";
-        }
-#endif
-
-        if (config.solver == physics::SolverKind::all && !physics::cuda_backend_available()) {
-            std::cout << "CUDA backend skipped: toolkit or runtime device is unavailable.\n";
+        if (config.sweep) {
+            run_sweep(config);
+        } else if (config.dump_every > 0) {
+            run_dump(config);
+        } else {
+            run_single(config);
         }
 
         return 0;
@@ -71,9 +124,3 @@ int main(int argc, char** argv) {
         return 1;
     }
 }
-
-//
-// cmake --build build -j
-// ./build/physicsProject --nx 1024 --ny 1024 --steps 200 --warmup 3
-// ./build/physicsProject --solver threads --threads 8 --nx 1024 --ny 1024 --steps 200 --warmup 3
-//

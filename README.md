@@ -1,57 +1,67 @@
-# physicsProject
+# Wave2D-Perf.
 
-Исследовательский стенд для сравнения нескольких реализаций эволюции двумерной волновой функции во времени.
+Исследовательский стенд для изучения **пределов производительности современных CPU**
+на примере численного решения 2D уравнения Шрёдингера.
 
-Сейчас в проекте уже есть:
+Цель не столько в физической точности, сколько в том, чтобы зафиксировать
+поведение железа на типичном stencil-вычислении и найти узкие места
+через профилирование и анализ.
 
-- `naive_aos`: наивная реализация на `std::complex<float>` с AoS-раскладкой.
-- `soa_*`: CPU-версия с раздельными массивами `real[]` / `imag[]`, padding по строкам и ручной SIMD-векторизацией.
-  На `arm64` используется NEON, на `x86_64` используется SSE, иначе включается fallback через compiler vector extensions.
-- `soa_*_threads`: многопоточный backend на `std::thread` и `std::barrier`, работает даже там, где OpenMP не установлен.
-- `soa_*_omp`: тот же backend, но с опциональным OpenMP-разбиением по блокам строк.
-- `cuda`: опциональный CUDA backend, который подключается только если CMake находит CUDA toolkit.
+В рамках проекта мы будем развивать вычисления: начнем с наивной версии (с использованием **std::complex<float>**) и будем двигаться к более оптимизированным вариантам.
 
-Модель выбрана простой и удобной для бенчмарка: явная схема для 2D time-dependent Schrodinger equation на пятиузловом stencil'е. Это хороший старт для исследования памяти, векторизации и GPU, даже если позже мы захотим перейти на более физически аккуратную схему.
+Отслеживать прогресс и ценность проекта будем при помощи бенчмарков и подробного профилирования вычислительного процесса.
+
+---
+
+## Физика задачи
+
+Решаем нестационарное уравнение Шрёдингера (ℏ = 1):
+
+```
+i ∂ψ/∂t = -(1/2m) ∇²ψ + V(x,y) ψ
+```
+
+Используем явную схему Эйлера + 5-точечный конечно-разностный лапласиан:
+
+```
+∂ψ/∂t = i/(2m) ∇²ψ - i·V·ψ
+
+∇²ψ[i,j] ≈ (ψ[i-1,j] + ψ[i+1,j] - 2ψ[i,j]) / dx²
+           + (ψ[i,j-1] + ψ[i,j+1] - 2ψ[i,j]) / dy²
+```
+
+Граничное условие: Дирихле (ψ = 0 на границах).
+Начальное состояние: гауссов волновой пакет + гармонический потенциал + двойная щель.
+
+---
 
 ## Сборка
 
 ```bash
-cmake -S . -B build
+cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
+
+# или без агрессивных оптимизаций (для анализа кода):
+cmake -B build_debug -DCMAKE_BUILD_TYPE=Debug -DWAVE2D_FAST_MATH=OFF -DWAVE2D_NATIVE_ARCH=OFF
+cmake --build build_debug -j
 ```
 
-## Быстрый запуск
+## Запуск
 
 ```bash
-./build/physicsProject
-./build/physicsProject --solver naive --nx 512 --ny 512 --steps 300
-./build/physicsProject --solver soa --nx 1024 --ny 1024 --steps 500 --tile-x 256 --tile-y 32
-./build/physicsProject --solver threads --threads 8 --nx 2048 --ny 2048 --steps 300
-./build/physicsProject --solver omp --threads 8 --tile-y 16
-./build/physicsProject --solver cuda
+# Одиночный замер
+./build/wave2d --nx 1024 --ny 1024 --steps 400
+
+# Sweep по размерам сетки → CSV
+./build/wave2d --sweep --steps 200
+python3 tools/plot_benchmark.py benchmark.csv
+
+# Дамп симуляции → анимация
+./build/wave2d --nx 512 --ny 512 --steps 25000 --dump-every 250 --output sim.bin
+
+python3 tools/animate_simulation.py sim.bin -o wave.mp4  # сохранить видео
 ```
 
-## Полезные аргументы
+---
 
-- `--solver all|naive|soa|threads|omp|cuda`
-- `--nx`, `--ny`
-- `--steps`, `--warmup`
-- `--dt`, `--dx`, `--dy`
-- `--mass`
-- `--tile-x`, `--tile-y`
-- `--threads`
-- `--potential-strength`, `--packet-sigma`, `--packet-kx`, `--packet-ky`
-
-## Дальше
-
-Замечание по именам в выводе:
-
-- `--solver soa` выбирает оптимизированный CPU backend, а в таблице он будет показан как конкретная реализация, например `soa_neon` на Apple Silicon или `soa_sse` на x86_64.
-- `--solver threads` выбирает тот же SIMD kernel, но с многопоточным разбиением по непрерывным диапазонам строк.
-
-Естественные следующие шаги:
-
-1. Добавить более устойчивую схему времени, например split-step Fourier или Crank-Nicolson / ADI.
-2. Вынести CPU SIMD на ISA-специфичные intrinsics и сравнить против compiler vector extensions.
-3. Исследовать влияние разных стратегий разбиения на блоки и ложного sharing при OpenMP.
-4. Доработать CUDA путь: shared memory tiling, pinned host memory, overlap transfer/compute, сравнение с unified memory.
+[Этап 1. Наивная реализация. ](./README-step1.md)
