@@ -14,3 +14,4 @@ README-dev.md
 # Simulation output
 *.bin
 *.mp4
+benchmark*.csv

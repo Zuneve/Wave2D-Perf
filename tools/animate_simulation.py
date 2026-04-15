@@ -21,7 +21,7 @@ import matplotlib.animation as animation
 
 
 def read_dump(path: str) -> dict:
-    """Parse the binary dump written by run_naive_dump()."""
+    """Parse the binary dump written by Wave2D dump mode."""
     with open(path, "rb") as f:
         magic = f.read(8)
         if magic[:6] != b"WAVE2D":

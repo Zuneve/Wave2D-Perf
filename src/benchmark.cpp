@@ -7,7 +7,14 @@ namespace physics {
 
 BenchmarkResult run_benchmark(const SimulationConfig& config) {
     const InitialState initial = make_initial_state(config);
-    return run_naive(config, initial);
+    switch (config.integrator) {
+        case IntegratorKind::cn_adi:
+            return run_cn_adi(config, initial);
+        case IntegratorKind::explicit_euler:
+            return run_euler(config, initial);
+    }
+
+    throw std::runtime_error("Unknown integrator.");
 }
 
 }  // namespace physics

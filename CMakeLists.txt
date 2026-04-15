@@ -13,7 +13,8 @@ add_library(wave2d_core
     src/benchmark.cpp
     src/config.cpp
     src/field.cpp
-    src/solvers/naive_solver.cpp
+    src/solvers/cn_adi_solver.cpp
+    src/solvers/euler_solver.cpp
 )
 
 target_include_directories(wave2d_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)

@@ -50,7 +50,7 @@ void advance_steps(
 
 }  // namespace
 
-BenchmarkResult run_naive(const SimulationConfig& config, const InitialState& initial) {
+BenchmarkResult run_euler(const SimulationConfig& config, const InitialState& initial) {
     std::vector<Complex> warm_current = initial.psi;
     std::vector<Complex> warm_next(initial.psi.size(), {0.0f, 0.0f});
     advance_steps(config, initial.potential, warm_current, warm_next, config.warmup_steps);
@@ -67,7 +67,7 @@ BenchmarkResult run_naive(const SimulationConfig& config, const InitialState& in
         static_cast<double>((config.nx - 2) * (config.ny - 2)) * static_cast<double>(config.steps);
 
     return {
-        .name          = "naive",
+        .name          = "euler",
         .nx            = config.nx,
         .ny            = config.ny,
         .steps         = config.steps,
@@ -78,7 +78,7 @@ BenchmarkResult run_naive(const SimulationConfig& config, const InitialState& in
     };
 }
 
-void run_naive_dump(const SimulationConfig& config, const InitialState& initial,
+void run_euler_dump(const SimulationConfig& config, const InitialState& initial,
                     const std::string& output_path) {
     if (config.dump_every == 0) {
         throw std::invalid_argument("dump_every must be > 0");

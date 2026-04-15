@@ -21,6 +21,8 @@ namespace {
         << "  --dx DX           Spatial step x (default: 0.1)\n"
         << "  --dy DY           Spatial step y (default: 0.1)\n"
         << "  --mass M          Particle mass (default: 1.0)\n"
+        << "  --threads N       Worker threads for parallel CN-ADI (default: auto)\n"
+        << "  --integrator cn-adi|euler  Time integrator (default: cn-adi)\n"
         << "  --potential-strength V\n"
         << "  --packet-sigma S  --packet-kx KX  --packet-ky KY\n\n"
         << "Modes:\n"
@@ -33,6 +35,14 @@ namespace {
 std::size_t parse_size(std::string_view label, const char* value) {
     try {
         return static_cast<std::size_t>(std::stoull(value));
+    } catch (const std::exception&) {
+        throw std::runtime_error("Invalid integer for " + std::string(label) + ": " + value);
+    }
+}
+
+int parse_int(std::string_view label, const char* value) {
+    try {
+        return std::stoi(value);
     } catch (const std::exception&) {
         throw std::runtime_error("Invalid integer for " + std::string(label) + ": " + value);
     }
@@ -51,6 +61,17 @@ const char* require_value(int argc, char** argv, int index) {
         throw std::runtime_error(std::string("Missing value for option ") + argv[index]);
     }
     return argv[index + 1];
+}
+
+IntegratorKind parse_integrator(const char* value) {
+    const std::string_view v = value;
+    if (v == "cn-adi") {
+        return IntegratorKind::cn_adi;
+    }
+    if (v == "euler") {
+        return IntegratorKind::explicit_euler;
+    }
+    throw std::runtime_error("Unknown integrator: " + std::string(value));
 }
 
 }  // namespace
@@ -96,6 +117,14 @@ SimulationConfig parse_args(int argc, char** argv) {
             config.mass = parse_float(arg, require_value(argc, argv, i++));
             continue;
         }
+        if (arg == "--threads") {
+            config.threads = parse_int(arg, require_value(argc, argv, i++));
+            continue;
+        }
+        if (arg == "--integrator") {
+            config.integrator = parse_integrator(require_value(argc, argv, i++));
+            continue;
+        }
         if (arg == "--potential-strength") {
             config.potential_strength = parse_float(arg, require_value(argc, argv, i++));
             continue;
@@ -137,8 +166,22 @@ SimulationConfig parse_args(int argc, char** argv) {
     if (config.mass <= 0.0f || config.dx <= 0.0f || config.dy <= 0.0f || config.dt <= 0.0f) {
         throw std::runtime_error("dt, dx, dy and mass must be positive.");
     }
+    if (config.threads < 0) {
+        throw std::runtime_error("threads must be non-negative.");
+    }
 
     return config;
+}
+
+std::string to_string(IntegratorKind integrator) {
+    switch (integrator) {
+        case IntegratorKind::cn_adi:
+            return "cn-adi";
+        case IntegratorKind::explicit_euler:
+            return "euler";
+    }
+
+    return "unknown";
 }
 
 }  // namespace physics

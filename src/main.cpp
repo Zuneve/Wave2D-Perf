@@ -40,9 +40,9 @@ void write_csv(const std::string& path, const std::vector<physics::BenchmarkResu
     std::ofstream f(path);
     if (!f) throw std::runtime_error("Cannot open CSV output: " + path);
 
-    f << "nx,ny,cells,steps,seconds,mlups,l2_norm,max_amplitude\n";
+    f << "integrator,nx,ny,cells,steps,seconds,mlups,l2_norm,max_amplitude\n";
     for (const auto& r : results) {
-        f << r.nx << "," << r.ny << "," << (r.nx * r.ny) << "," << r.steps << ","
+        f << r.name << "," << r.nx << "," << r.ny << "," << (r.nx * r.ny) << "," << r.steps << ","
           << std::fixed      << std::setprecision(9) << r.seconds      << ","
           << std::fixed      << std::setprecision(6) << r.mlups        << ","
           << std::scientific << std::setprecision(9) << r.l2_norm      << ","
@@ -51,11 +51,17 @@ void write_csv(const std::string& path, const std::vector<physics::BenchmarkResu
 }
 
 void run_single(const physics::SimulationConfig& config) {
-    std::cout << "Wave2D — naive std::complex<float>\n"
+    std::cout << "Wave2D — 2D time-dependent Schrodinger benchmark\n"
               << "grid: " << config.nx << "x" << config.ny
               << "  steps: " << config.steps
               << "  dt: " << config.dt
+              << "  integrator: " << physics::to_string(config.integrator)
               << "  dx: " << config.dx << "\n\n";
+
+    if (config.integrator == physics::IntegratorKind::explicit_euler) {
+        std::cout << "Warning: explicit Euler is kept only as a naive baseline. "
+                     "It is not norm-preserving and is unreliable for long-time Schrödinger dynamics.\n\n";
+    }
 
     print_header();
     print_result(physics::run_benchmark(config));
@@ -64,7 +70,7 @@ void run_single(const physics::SimulationConfig& config) {
 void run_sweep(const physics::SimulationConfig& base) {
     const std::vector<std::size_t> sizes = {128, 256, 512, 1024, 2048};
 
-    std::cout << "Sweep benchmark — naive std::complex<float>\n"
+    std::cout << "Sweep benchmark — integrator: " << physics::to_string(base.integrator) << "\n"
               << "steps: " << base.steps
               << "  dt: " << base.dt
               << "  dx: " << base.dx << "\n\n";
@@ -93,11 +99,19 @@ void run_dump(const physics::SimulationConfig& config) {
 
     std::cout << "Simulation dump — " << config.nx << "x" << config.ny
               << "  steps: " << config.steps
+              << "  integrator: " << physics::to_string(config.integrator)
               << "  dump every: " << config.dump_every << " steps\n"
               << n_frames << " frames  ~" << mb << " MB  -> " << out_path << "\n";
 
     const physics::InitialState initial = physics::make_initial_state(config);
-    physics::run_naive_dump(config, initial, out_path);
+    switch (config.integrator) {
+        case physics::IntegratorKind::cn_adi:
+            physics::run_cn_adi_dump(config, initial, out_path);
+            break;
+        case physics::IntegratorKind::explicit_euler:
+            physics::run_euler_dump(config, initial, out_path);
+            break;
+    }
 
     std::cout << "Done.\n"
               << "Animate:  python3 tools/animate_simulation.py " << out_path << "\n"

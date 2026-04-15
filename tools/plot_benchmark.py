@@ -22,6 +22,7 @@ def read_csv(path: str) -> list[dict]:
         for row in csv.DictReader(f):
             rows.append(
                 {
+                    "integrator": row.get("integrator", "unknown"),
                     "nx": int(row["nx"]),
                     "ny": int(row["ny"]),
                     "cells": int(row["cells"]),
@@ -37,6 +38,8 @@ def read_csv(path: str) -> list[dict]:
 
 def plot(csv_path: str, output_path: str | None = None) -> None:
     rows = read_csv(csv_path)
+    integrators = sorted({r["integrator"] for r in rows})
+    integrator_label = ", ".join(integrators)
 
     labels  = [f"{r['nx']}×{r['ny']}" for r in rows]
     mlups   = [r["mlups"]   for r in rows]
@@ -44,7 +47,7 @@ def plot(csv_path: str, output_path: str | None = None) -> None:
     cells   = [r["cells"]   for r in rows]
 
     fig, axes = plt.subplots(1, 3, figsize=(15, 5))
-    fig.suptitle("Wave2D — Naive std::complex<float> — Benchmark Sweep",
+    fig.suptitle(f"Wave2D — {integrator_label} — Benchmark Sweep",
                  fontsize=13, fontweight="bold")
 
     ax = axes[0]

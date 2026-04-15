@@ -1,8 +1,18 @@
 #include "physics/field.hpp"
 
+#include <algorithm>
 #include <cmath>
 
 namespace physics {
+
+namespace {
+
+std::size_t padded_pitch(std::size_t nx) {
+    constexpr std::size_t alignment_floats = 16;
+    return ((nx + alignment_floats - 1) / alignment_floats) * alignment_floats;
+}
+
+}  // namespace
 
 InitialState make_initial_state(const SimulationConfig& config) {
     InitialState initial;
@@ -53,6 +63,30 @@ InitialState make_initial_state(const SimulationConfig& config) {
     return initial;
 }
 
+SoAField make_soa_field(std::size_t nx, std::size_t ny) {
+    SoAField field;
+    field.nx = nx;
+    field.ny = ny;
+    field.pitch = padded_pitch(nx);
+    field.real.assign(field.pitch * ny, 0.0f);
+    field.imag.assign(field.pitch * ny, 0.0f);
+    field.potential.assign(field.pitch * ny, 0.0f);
+    return field;
+}
+
+void fill_soa_from_initial(const InitialState& initial, SoAField& field) {
+    for (std::size_t y = 0; y < initial.ny; ++y) {
+        const std::size_t src_row = y * initial.nx;
+        const std::size_t dst_row = y * field.pitch;
+        for (std::size_t x = 0; x < initial.nx; ++x) {
+            const auto value = initial.psi[src_row + x];
+            field.real[dst_row + x] = value.real();
+            field.imag[dst_row + x] = value.imag();
+            field.potential[dst_row + x] = initial.potential[src_row + x];
+        }
+    }
+}
+
 double l2_norm(const std::vector<std::complex<float>>& psi) {
     double sum = 0.0;
     for (const auto& value : psi) {
@@ -61,10 +95,36 @@ double l2_norm(const std::vector<std::complex<float>>& psi) {
     return sum;
 }
 
+double l2_norm(const SoAField& field) {
+    double sum = 0.0;
+    for (std::size_t y = 0; y < field.ny; ++y) {
+        const std::size_t row = y * field.pitch;
+        for (std::size_t x = 0; x < field.nx; ++x) {
+            const double real = field.real[row + x];
+            const double imag = field.imag[row + x];
+            sum += real * real + imag * imag;
+        }
+    }
+    return sum;
+}
+
 float max_amplitude(const std::vector<std::complex<float>>& psi) {
     float maximum = 0.0f;
     for (const auto& value : psi) {
         maximum = std::max(maximum, std::abs(value));
+    }
+    return maximum;
+}
+
+float max_amplitude(const SoAField& field) {
+    float maximum = 0.0f;
+    for (std::size_t y = 0; y < field.ny; ++y) {
+        const std::size_t row = y * field.pitch;
+        for (std::size_t x = 0; x < field.nx; ++x) {
+            const float real = field.real[row + x];
+            const float imag = field.imag[row + x];
+            maximum = std::max(maximum, std::sqrt(real * real + imag * imag));
+        }
     }
     return maximum;
 }
