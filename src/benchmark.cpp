@@ -12,6 +12,8 @@ BenchmarkResult run_benchmark(const SimulationConfig& config) {
             return run_cn_adi(config, initial);
         case IntegratorKind::explicit_euler:
             return run_euler(config, initial);
+        case IntegratorKind::cuda_cn_adi:
+            return run_cn_adi_cuda(config, initial);
     }
 
     throw std::runtime_error("Unknown integrator.");

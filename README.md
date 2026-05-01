@@ -73,6 +73,10 @@ cmake --build build -j
 # или без агрессивных оптимизаций (для анализа кода):
 cmake -B build_debug -DCMAKE_BUILD_TYPE=Debug -DWAVE2D_FAST_MATH=OFF -DWAVE2D_NATIVE_ARCH=OFF
 cmake --build build_debug -j
+
+# опционально: сборка с CUDA-интегратором (нужен CUDA Toolkit / nvcc)
+cmake -B build_cuda -DCMAKE_BUILD_TYPE=Release -DWAVE2D_WITH_CUDA=ON
+cmake --build build_cuda -j
 ```
 
 ## Запуск
@@ -87,6 +91,9 @@ cmake --build build_debug -j
 # Наивный baseline на явном Эйлере
 ./build/wave2d --integrator euler --nx 1024 --ny 1024 --steps 400
 
+# CUDA-версия основного solver (если собран build_cuda)
+./build_cuda/wave2d --integrator cuda-cn-adi --nx 1024 --ny 1024 --steps 400
+
 # Sweep по размерам сетки → CSV
 ./build/wave2d --sweep --steps 200
 python3 tools/plot_benchmark.py benchmark.csv
@@ -96,6 +103,24 @@ python3 tools/plot_benchmark.py benchmark.csv
 
 python3 tools/animate_simulation.py sim.bin -o wave.mp4  # сохранить видео
 ```
+
+### CUDA fallback
+
+Интегратор `cuda-cn-adi` работает как безопасный режим:
+- если бинарник собран без `-DWAVE2D_WITH_CUDA=ON`, будет выведено предупреждение и автоматически запустится CPU-версия `cn-adi`;
+- если CUDA включена, но GPU-путь недоступен во время выполнения, также происходит автоматический fallback на CPU `cn-adi`.
+
+### Быстрое сравнение CPU vs CUDA
+
+```bash
+# CPU (обычная сборка)
+./build/wave2d --integrator cn-adi --nx 1024 --ny 1024 --steps 300 --threads 8
+
+# GPU (CUDA-сборка)
+./build_cuda/wave2d --integrator cuda-cn-adi --nx 1024 --ny 1024 --steps 300
+```
+
+Сравнивайте поле `MLUPS` в выводе: чем больше значение, тем выше производительность.
 
 ---
 

@@ -4,6 +4,7 @@ project(wave2d LANGUAGES CXX)
 
 option(WAVE2D_FAST_MATH   "Enable aggressive floating-point optimizations" ON)
 option(WAVE2D_NATIVE_ARCH "Tune CPU code for the host microarchitecture"   ON)
+option(WAVE2D_WITH_CUDA   "Build optional CUDA integrator (cuda-cn-adi)"   OFF)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -14,6 +15,7 @@ add_library(wave2d_core
     src/config.cpp
     src/field.cpp
     src/solvers/cn_adi_solver.cpp
+    src/solvers/cn_adi_cuda.cpp
     src/solvers/euler_solver.cpp
 )
 
@@ -33,6 +35,17 @@ else()
     if(WAVE2D_NATIVE_ARCH)
         target_compile_options(wave2d_core PRIVATE -march=native)
     endif()
+endif()
+
+if(WAVE2D_WITH_CUDA)
+    enable_language(CUDA)
+    target_sources(wave2d_core PRIVATE src/solvers/cn_adi_cuda.cu)
+    target_compile_definitions(wave2d_core PRIVATE WAVE2D_ENABLE_CUDA=1)
+    set_target_properties(wave2d_core PROPERTIES
+        CUDA_STANDARD 17
+        CUDA_STANDARD_REQUIRED ON
+        CUDA_SEPARABLE_COMPILATION ON
+    )
 endif()
 
 add_executable(wave2d src/main.cpp)

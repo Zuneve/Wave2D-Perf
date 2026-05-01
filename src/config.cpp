@@ -22,7 +22,7 @@ namespace {
         << "  --dy DY           Spatial step y (default: 0.1)\n"
         << "  --mass M          Particle mass (default: 1.0)\n"
         << "  --threads N       Worker threads for parallel CN-ADI (default: auto)\n"
-        << "  --integrator cn-adi|euler  Time integrator (default: cn-adi)\n"
+        << "  --integrator cn-adi|euler|cuda-cn-adi  Time integrator (default: cn-adi)\n"
         << "  --potential-strength V\n"
         << "  --packet-sigma S  --packet-kx KX  --packet-ky KY\n\n"
         << "Modes:\n"
@@ -70,6 +70,9 @@ IntegratorKind parse_integrator(const char* value) {
     }
     if (v == "euler") {
         return IntegratorKind::explicit_euler;
+    }
+    if (v == "cuda-cn-adi") {
+        return IntegratorKind::cuda_cn_adi;
     }
     throw std::runtime_error("Unknown integrator: " + std::string(value));
 }
@@ -179,6 +182,8 @@ std::string to_string(IntegratorKind integrator) {
             return "cn-adi";
         case IntegratorKind::explicit_euler:
             return "euler";
+        case IntegratorKind::cuda_cn_adi:
+            return "cuda-cn-adi";
     }
 
     return "unknown";
