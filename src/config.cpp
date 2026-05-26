@@ -22,7 +22,13 @@ namespace {
         << "  --dy DY           Spatial step y (default: 0.1)\n"
         << "  --mass M          Particle mass (default: 1.0)\n"
         << "  --threads N       Worker threads for parallel CN-ADI (default: auto)\n"
-        << "  --integrator cn-adi|euler|cuda-cn-adi  Time integrator (default: cn-adi)\n"
+        << "  --integrator KIND  Time integrator (default: cn-adi). KIND is one of:\n"
+        << "        cn-adi          hand-written CPU CN-ADI (SoA + threads + SIMD)\n"
+        << "        euler           naive explicit-Euler baseline\n"
+        << "        lapack-cn-adi   same CN-ADI, tridiagonal solve via LAPACK cgtsv\n"
+        << "        cuda-cn-adi     hand-written CUDA CN-ADI (needs WAVE2D_WITH_CUDA)\n"
+        << "        cusparse-cn-adi GPU CN-ADI via cuSPARSE gtsvInterleavedBatch\n"
+        << "        magma-cn-adi    GPU CN-ADI via MAGMA batched dense LU\n"
         << "  --potential-strength V\n"
         << "  --packet-sigma S  --packet-kx KX  --packet-ky KY\n\n"
         << "Modes:\n"
@@ -73,6 +79,15 @@ IntegratorKind parse_integrator(const char* value) {
     }
     if (v == "cuda-cn-adi") {
         return IntegratorKind::cuda_cn_adi;
+    }
+    if (v == "lapack-cn-adi" || v == "cn-adi-lapack") {
+        return IntegratorKind::lapack_cn_adi;
+    }
+    if (v == "cusparse-cn-adi" || v == "cn-adi-cusparse") {
+        return IntegratorKind::cusparse_cn_adi;
+    }
+    if (v == "magma-cn-adi" || v == "cn-adi-magma") {
+        return IntegratorKind::magma_cn_adi;
     }
     throw std::runtime_error("Unknown integrator: " + std::string(value));
 }
@@ -184,6 +199,12 @@ std::string to_string(IntegratorKind integrator) {
             return "euler";
         case IntegratorKind::cuda_cn_adi:
             return "cuda-cn-adi";
+        case IntegratorKind::lapack_cn_adi:
+            return "lapack-cn-adi";
+        case IntegratorKind::cusparse_cn_adi:
+            return "cusparse-cn-adi";
+        case IntegratorKind::magma_cn_adi:
+            return "magma-cn-adi";
     }
 
     return "unknown";

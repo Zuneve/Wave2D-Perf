@@ -124,4 +124,77 @@ python3 tools/animate_simulation.py sim.bin -o wave.mp4  # сохранить в
 
 ---
 
+## Дуэль: наш алгоритм против стандартных библиотек
+
+Отдельная задача стенда — честно сравнить наш рукописный CN-ADI с реализациями
+**той же физической задачи через стандартные высокопроизводительные библиотеки**.
+Идея: «вот наш алгоритм, вот стандартный пакет — кто быстрее».
+
+Методология честного сравнения:
+- алгоритм (CN-ADI, схема Cayley, 3 ADI-прохода `X→Y→X` за шаг) и сама
+  трёхдиагональная система **идентичны** во всех вариантах;
+- библиотеке отдаётся ровно *решение* системы, всё остальное (начальные данные,
+  предвычисление коэффициентов, граничные условия) общее;
+- корректность проверяется по совпадению `L2 norm` и `max|psi|` с нашим solver'ом
+  (расхождения только на уровне float-округления из-за другого порядка исключения).
+
+Соперники (интеграторы выбираются флагом `--integrator`):
+
+| Интегратор | Площадка | Что делает |
+|---|---|---|
+| `cn-adi` | CPU | наш solver: SoA, потоки, SIMD по 4 столбца, спец-арифметика |
+| `lapack-cn-adi` | CPU | та же система, прогонка через LAPACK `cgtsv` (Accelerate/Netlib) |
+| `cuda-cn-adi` | GPU | наше CUDA-ядро (по потоку на строку/столбец) |
+| `cusparse-cn-adi` | GPU | батч прогонок через cuSPARSE `gtsvInterleavedBatch` |
+| `magma-cn-adi` | GPU | батч **плотных** LU через MAGMA `magma_cgesv_batched` |
+
+### CPU-дуэль (наш vs LAPACK cgtsv)
+
+Воспроизведение:
+```bash
+cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j
+python3 tools/duel.py --integrators cn-adi lapack-cn-adi --threads 8
+```
+
+Типичный результат (Apple Silicon, MLUPS, больше = лучше):
+
+| сетка | наш (8т) | LAPACK (8т) | ускорение |
+|---|---|---|---|
+| 256² | ~100 | ~30 | **≈3.4×** |
+| 512² | ~135 | ~40 | **≈3.4×** |
+| 1024² | ~185 | ~46 | **≈4.0×** |
+
+Почему мы быстрее: `cgtsv` — *general* солвер с partial pivoting (лишние ветвления
+и перестановки на диагонально доминантной системе), работает с чередующимися
+`std::complex`, не использует постоянство внедиагонали и предвычисленные коэффициенты.
+
+### GPU-дуэль (наше CUDA-ядро vs cuSPARSE / MAGMA)
+
+> Требуется машина с NVIDIA GPU и CUDA Toolkit. `cn_adi_cusparse.cu` и
+> `cn_adi_magma.cu` подготовлены, но на CPU-only машине не компилируются —
+> первая сборка на GPU-боксе и есть шаг валидации (сверять `L2 norm` с `cn-adi`).
+
+```bash
+# cuSPARSE входит в CUDA Toolkit
+cmake -B build_cuda -DCMAKE_BUILD_TYPE=Release \
+      -DWAVE2D_WITH_CUDA=ON -DWAVE2D_WITH_CUSPARSE=ON
+# + MAGMA (ставится отдельно; укажите MAGMA_ROOT)
+cmake -B build_cuda -DCMAKE_BUILD_TYPE=Release \
+      -DWAVE2D_WITH_CUDA=ON -DWAVE2D_WITH_CUSPARSE=ON \
+      -DWAVE2D_WITH_MAGMA=ON -DMAGMA_ROOT=/opt/magma
+cmake --build build_cuda -j
+
+python3 tools/duel.py --bin ./build_cuda/wave2d \
+    --integrators cuda-cn-adi cusparse-cn-adi magma-cn-adi
+```
+
+Ожидания: cuSPARSE — честный соперник нашему ядру (батч трёхдиагональных систем).
+MAGMA здесь нарочно «не в своей весовой категории»: у неё нет батч-трёхдиагонального
+солвера, поэтому каждую систему приходится разворачивать в плотную матрицу и решать
+LU — это `O(n³)` на систему и `O(batch·n²)` памяти, поэтому на крупных сетках MAGMA
+заведомо проигрывает на порядки (а большие сетки просто не влезают в память —
+сработает мягкий лимит и fallback на CPU).
+
+---
+
 [Этап 1. Наивная реализация. ](./README-step1.md)

@@ -9,6 +9,9 @@ enum class IntegratorKind {
     cn_adi,
     explicit_euler,
     cuda_cn_adi,
+    lapack_cn_adi,
+    cusparse_cn_adi,
+    magma_cn_adi,
 };
 
 struct SimulationConfig {

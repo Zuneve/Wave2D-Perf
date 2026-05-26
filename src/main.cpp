@@ -107,6 +107,9 @@ void run_dump(const physics::SimulationConfig& config) {
     switch (config.integrator) {
         case physics::IntegratorKind::cn_adi:
         case physics::IntegratorKind::cuda_cn_adi:
+        case physics::IntegratorKind::lapack_cn_adi:
+        case physics::IntegratorKind::cusparse_cn_adi:
+        case physics::IntegratorKind::magma_cn_adi:
             physics::run_cn_adi_dump(config, initial, out_path);
             break;
         case physics::IntegratorKind::explicit_euler:
